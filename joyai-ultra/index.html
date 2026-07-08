@@ -1,0 +1,1157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JoyAI Ultra</title>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; overflow-x: hidden; }
+:root {
+  --bg: #ffffff; --bg-secondary: #f7f8fa; --bg-sidebar: #ffffff; --bg-hover: #e8e9eb;
+  --bg-input: #f5f6f8; --bg-card: #ffffff; --text-primary: #1a1a1a; --text-secondary: #666666;
+  --text-muted: #999999; --border: #e5e5e5; --border-light: #eeeeee;
+  --shadow-card: 0 2px 12px rgba(0,0,0,0.06); --accent: #3b82f6; --icon-dim: #b0b0b0;
+  --overlay-blur-bg: rgba(255,255,255,0.7);
+}
+.dark {
+  --bg: #0a0f1e; --bg-secondary: #111827; --bg-sidebar: #111520; --bg-hover: #1e293b;
+  --bg-input: #161d2e; --bg-card: #1a2035; --text-primary: #e2e8f0; --text-secondary: #94a3b8;
+  --text-muted: #64748b; --border: #1e293b; --border-light: #1e293b;
+  --shadow-card: 0 2px 16px rgba(0,0,0,0.3); --accent: #3b82f6; --icon-dim: #475569;
+  --overlay-blur-bg: rgba(10,15,30,0.7);
+}
+body { background: var(--bg); color: var(--text-primary); transition: background 0.3s, color 0.3s; }
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+@keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+.fade-in { animation: fadeIn 0.4s ease-out forwards; }
+@keyframes float {
+  0%,100% { transform: translateY(0) translateX(0); opacity:0.5; }
+  25% { transform: translateY(-18px) translateX(8px); opacity:0.9; }
+  50% { transform: translateY(-8px) translateX(-6px); opacity:0.6; }
+  75% { transform: translateY(-22px) translateX(4px); opacity:0.8; }
+}
+.particle { position: absolute; border-radius: 50%; background: radial-gradient(circle, rgba(59,130,246,0.5), rgba(139,92,246,0.2)); filter: blur(6px); pointer-events: none; animation: float linear infinite; }
+.drag-overlay { position: fixed; inset:0; z-index:9999; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); background: var(--overlay-blur-bg); display: flex; flex-direction: column; align-items: center; justify-content: center; }
+textarea::placeholder { color: var(--icon-dim) !important; opacity: 1; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useCallback, useRef, useEffect, useMemo } = React;
+
+const MODELS = [
+  { id: 'flash', name: 'JoyAI-Flash' },
+  { id: 'vl', name: 'JoyAI-VL' },
+  { id: 'vl-interaction', name: 'JoyAI-VL-Interaction', page: 'streaming' },
+  { id: 'image', name: 'JoyAI-Image' },
+  { id: 'image-edit', name: 'JoyAI-Image-Edit' },
+  { id: 'video', name: 'JoyAI-Video' },
+  { id: 'video-edit', name: 'JoyAI-Video-Edit' },
+  { id: 'echo-longvideo', name: 'JoyAI-Echo-longvideo', page: 'longvideo' },
+  { id: 'echo-wm', name: 'JoyAI-Echo-WM' },
+  { id: 'sim', name: 'JoyAI-Sim', page: 'simulation' },
+];
+
+const FEATURES = [
+  { label: '流式理解', icon: 'fa-solid fa-brain', gradient: 'linear-gradient(135deg, #6366f1, #8b5cf6)', page: 'streaming' },
+  { label: '长视频生成', icon: 'fa-solid fa-film', gradient: 'linear-gradient(135deg, #f59e0b, #f97316)', page: 'longvideo' },
+  { label: '实时编辑', icon: 'fa-solid fa-pen-nib', gradient: 'linear-gradient(135deg, #10b981, #14b8a6)', page: 'realedit' },
+  { label: '世界模型', icon: 'fa-solid fa-globe', gradient: 'linear-gradient(135deg, #3b82f6, #6366f1)', page: null },
+  { label: '仿真体验', icon: 'fa-solid fa-vr-cardboard', gradient: 'linear-gradient(135deg, #ec4899, #f43f5e)', page: 'simulation' },
+];
+
+const PAGES = { longvideo: 'assets/page-longvideo.png', streaming: 'assets/page-streaming.png', simulation: 'assets/page-simulation.png', realedit: 'assets/page-realedit.png' };
+
+const INPUT_TOOLS = [
+  { id: 'image-gen', label: '视觉创作', svgIcon: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-1 0-.83.67-1.5 1.5-1.5H16c3.31 0 6-2.69 6-6 0-4.96-4.48-9-10-9z"/><circle cx="9.5" cy="7.5" r="1.5" fill="currentColor"/></svg>' },
+  { id: 'voice-chat', label: '语音聊天', svgIcon: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>' },
+  { id: 'voice-clone', label: '音色创作', icon: 'fa-solid fa-wand-magic-sparkles' },
+];
+
+const SVG_GLOBE = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10A15.3 15.3 0 0 1 12 2z"/></svg>';
+
+const SVG_TUXIANG = '<svg width="14" height="12" viewBox="0 0 1194 1024" fill="currentColor"><path d="M879.447421 337.416551m-59.501836 61.551427a85.609851 85.609851 0 1 0 119.003672-123.102853 85.609851 85.609851 0 1 0-119.003672 123.102853Z"/><path d="M1052.536617 0H142.019443A142.019443 142.019443 0 0 0 0 142.019443v739.961114a142.683085 142.683085 0 0 0 142.019443 142.019443h910.517174A142.683085 142.683085 0 0 0 1194.55606 881.980557V142.019443A142.019443 142.019443 0 0 0 1052.536617 0z m56.409592 881.980557a57.073234 57.073234 0 0 1-56.409592 56.409592H142.019443a57.073234 57.073234 0 0 1-56.409592-56.409592v-110.828256l208.383668-208.383668A50.436811 50.436811 0 0 1 331.821128 548.168503a49.109527 49.109527 0 0 1 34.509397 16.591056l226.965651 250.856773a132.728451 132.728451 0 0 0 186.483474 12.609203l128.082955-109.500972a49.109527 49.109527 0 0 1 66.364226 0l139.364873 122.110175z m0-153.965003l-82.955282-73.000648a132.728451 132.728451 0 0 0-175.201556 0l-128.082955 108.173688a48.445885 48.445885 0 0 1-66.364225-4.645496L428.049255 507.686325a132.728451 132.728451 0 0 0-194.447181-5.309138L85.609851 651.033052V142.019443a57.073234 57.073234 0 0 1 56.409592-56.409592h910.517174a57.073234 57.073234 0 0 1 56.409592 56.409592z"/></svg>';
+
+const SVG_LUXIANG = '<svg width="17" height="17" viewBox="0 0 1024 1024" fill="currentColor"><path d="M937.6 326.4c-20.8-28.8-60.8-35.2-89.6-16l-64 44.8V352c0-88-72-160-160-160H240C152 192 80 264 80 352v320c0 88 72 160 160 160h384c84.8 0 153.6-65.6 160-147.2l65.6 44.8c11.2 8 24 11.2 36.8 11.2 35.2 0 64-28.8 64-64V363.2c-1.6-12.8-4.8-25.6-12.8-36.8zM720 672c0 52.8-43.2 96-96 96H240c-52.8 0-96-43.2-96-96V352c0-52.8 43.2-96 96-96h384c52.8 0 96 43.2 96 96v320z m164.8 4.8L784 606.4V433.6l100.8-70.4v313.6z"/><path d="M288 400m-48 0a48 48 0 1 0 96 0 48 48 0 1 0-96 0Z"/></svg>';
+
+const SVG_QIUTI = '<svg width="14" height="14" viewBox="0 0 1024 1024" fill="currentColor"><path d="M512 64c247.424 0 448 200.576 448 448S759.424 960 512 960 64 759.424 64 512 264.576 64 512 64z m0 80c-203.24 0-368 164.76-368 368s164.76 368 368 368 368-164.76 368-368-164.76-368-368-368z"/><path d="M920 472c22.091 0 40 17.909 40 40 0 33.053-16.862 62.742-46.124 87.67-24.589 20.944-58.447 39.001-99.818 53.907C733.382 682.644 626.052 699 512 699c-114.052 0-221.382-16.356-302.058-45.423-41.37-14.906-75.23-32.963-99.818-53.908C80.862 574.742 64 545.053 64 512c0-22.091 17.909-40 40-40s40 17.909 40 40c0 6.774 5.129 15.804 18.001 26.769 16.407 13.976 42.048 27.65 75.058 39.544C308.425 604.025 406.689 619 512 619c105.311 0 203.575-14.975 274.941-40.687 33.01-11.893 58.651-25.568 75.058-39.544C874.871 527.804 880 518.774 880 512c0-22.091 17.909-40 40-40z"/><path d="M552.5 919.5c0 22.091-17.909 40-40 40-33.053 0-62.742-16.862-87.67-46.124-20.944-24.589-39.001-58.447-53.907-99.818C341.856 732.882 325.5 625.552 325.5 511.5c0-131.716 26.485-259.579 68.531-346 14.538-29.881 29.15-52.547 45.697-69.24 20.876-21.059 45.27-32.76 72.772-32.76 22.091 0 40 17.909 40 40s-17.909 40-40 40c-4.484 0-9.194 2.26-15.956 9.08-9.35 9.434-19.542 25.242-30.575 47.92-36.452 74.923-60.469 190.869-60.469 311 0 105.311 14.975 203.575 40.687 274.941 11.893 33.01 25.568 58.651 39.544 75.058 10.965 12.872 19.995 18.001 26.769 18.001 22.091 0 40 17.909 40 40z"/></svg>';
+
+const SVG_TIAOJIEQI = '<svg width="14" height="14" viewBox="0 0 1024 1024" fill="currentColor"><path d="M247.327 180.171h56.885V625.77h-56.885zM247.327 692.136H162v56.885h85.327v94.808h56.885v-94.808h85.328v-56.885h-85.328zM719.788 180.171h56.885V625.77h-56.885zM776.673 692.136H634.46v56.885h85.328v94.808h56.885v-94.808H862v-56.885zM483.559 398.23h56.885v445.599h-56.885zM540.444 180.171h-56.885v94.808h-85.328v56.885h227.54v-56.885h-85.327z"/></svg>';
+
+const SVG_SUN = '<svg width="22" height="22" viewBox="0 0 1024 1024" fill="currentColor"><path d="M501.48 493.55m-233.03 0a233.03 233.03 0 1 0 466.06 0 233.03 233.03 0 1 0-466.06 0Z"/><path d="M501.52 185.35H478.9c-8.28 0-15-6.72-15-15V87.59c0-8.28 6.72-15 15-15h22.62c8.28 0 15 6.72 15 15v82.76c0 8.28-6.72 15-15 15zM281.37 262.76l-16 16c-5.86 5.86-15.36 5.86-21.21 0l-58.52-58.52c-5.86-5.86-5.86-15.36 0-21.21l16-16c5.86-5.86 15.36-5.86 21.21 0l58.52 58.52c5.86 5.86 5.86 15.35 0 21.21zM185.76 478.48v22.62c0 8.28-6.72 15-15 15H88c-8.28 0-15-6.72-15-15v-22.62c0-8.28 6.72-15 15-15h82.76c8.28 0 15 6.72 15 15zM270.69 698.63l16 16c5.86 5.86 5.86 15.36 0 21.21l-58.52 58.52c-5.86 5.86-15.36 5.86-21.21 0l-16-16c-5.86-5.86-5.86-15.36 0-21.21l58.52-58.52c5.85-5.86 15.35-5.86 21.21 0zM486.41 794.24h22.62c8.28 0 15 6.72 15 15V892c0 8.28-6.72 15-15 15h-22.62c-8.28 0-15-6.72-15-15v-82.76c0-8.28 6.72-15 15-15zM706.56 709.31l16-16c5.86-5.86 15.36-5.86 21.21 0l58.52 58.52c5.86 5.86 5.86 15.36 0 21.21l-16 16c-5.86 5.86-15.36 5.86-21.21 0l-58.52-58.52c-5.86-5.85-5.86-15.35 0-21.21zM802.17 493.59v-22.62c0-8.28 6.72-15 15-15h82.76c8.28 0 15 6.72 15 15v22.62c0 8.28-6.72 15-15 15h-82.76c-8.28 0-15-6.72-15-15zM717.24 273.44l-16-16c-5.86-5.86-5.86-15.36 0-21.21l58.52-58.52c5.86-5.86 15.36-5.86 21.21 0l16 16c5.86 5.86 5.86 15.36 0 21.21l-58.52 58.52c-5.86 5.86-15.35 5.86-21.21 0z"/></svg>';
+
+const iconBtnStyle = { background:'none', border:'none', cursor:'pointer', padding:4, borderRadius:6, display:'flex', alignItems:'center', justifyContent:'center' };
+const iconBtnSmall = { background:'none', border:'none', cursor:'pointer', padding:6, borderRadius:6, display:'flex', alignItems:'center', justifyContent:'center' };
+
+function generateMockReply(input) {
+  return '关于"' + input.slice(0, 15) + '"，我来为您分析：\n\n这是一个很好的问题。从多个维度来看，我建议采用模块化的方案，结合实际需求逐步推进。\n\n如需更多帮助，请继续提问。';
+}
+
+// ════════════════════════════════════════════════════════════════
+// SIDEBAR
+// ════════════════════════════════════════════════════════════════
+
+function Sidebar({ collapsed, onToggle, sessions, activeSessionId, onSelectSession, onNewChat }) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef(null);
+
+  const filteredSessions = searchQuery.trim()
+    ? sessions.filter(s => s.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    : sessions;
+
+  useEffect(() => {
+    if (searchOpen && searchInputRef.current) searchInputRef.current.focus();
+  }, [searchOpen]);
+
+  return (
+    <div style={{
+      width: collapsed ? 0 : 260, minWidth: collapsed ? 0 : 260, height: '100vh',
+      background: 'var(--bg-sidebar)', borderRight: collapsed ? 'none' : '1px solid var(--border-light)',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      transition: 'width 0.3s ease, min-width 0.3s ease', flexShrink: 0,
+    }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 16px 12px' }}>
+        <img src="assets/logo.png" alt="JoyAI" style={{ height: 28, objectFit:'contain' }} />
+        <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+          <button style={iconBtnStyle} onClick={() => { setSearchOpen(!searchOpen); if (searchOpen) setSearchQuery(''); }} title="搜索"><i className="fa-solid fa-magnifying-glass" style={{ fontSize:14, color: searchOpen ? 'var(--accent)' : 'var(--text-muted)' }}></i></button>
+          <button style={iconBtnStyle} onClick={onToggle} title="收起"><i className="fa-solid fa-angles-left" style={{ fontSize:14, color:'var(--text-muted)' }}></i></button>
+        </div>
+      </div>
+      {searchOpen && (
+        <div style={{ padding:'0 12px 10px' }}>
+          <input
+            ref={searchInputRef}
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="搜索历史对话..."
+            style={{
+              width:'100%', padding:'8px 10px', borderRadius:8,
+              border:'1px solid var(--border)', background:'var(--bg)',
+              fontSize:12, color:'var(--text-primary)', outline:'none',
+            }}
+          />
+        </div>
+      )}
+      <div style={{ padding:'0 12px 16px' }}>
+        <button onClick={onNewChat} style={{
+          width:'100%', padding:'10px', borderRadius:8, border:'1px dashed var(--border)',
+          background:'transparent', color:'var(--text-secondary)', cursor:'pointer',
+          fontSize:13, display:'flex', alignItems:'center', justifyContent:'center', gap:6,
+          transition:'background 0.2s',
+        }}
+          onMouseEnter={e => e.currentTarget.style.background='var(--bg-hover)'}
+          onMouseLeave={e => e.currentTarget.style.background='transparent'}
+        >
+          <i className="fa-solid fa-plus" style={{ fontSize:12 }}></i>
+          创建新对话
+        </button>
+      </div>
+      <div style={{ padding:'0 16px 8px', fontSize:11, color:'var(--text-muted)', fontWeight:500 }}>最近对话</div>
+      <div style={{ flex:1, overflowY:'auto', padding:'0 8px' }}>
+        {filteredSessions.map((s) => (
+          <div key={s.id} onClick={() => onSelectSession(s.id)} style={{
+            padding:'9px 12px', borderRadius:8, fontSize:13,
+            color: activeSessionId === s.id ? 'var(--text-primary)' : 'var(--text-secondary)',
+            background: activeSessionId === s.id ? 'var(--bg-hover)' : 'transparent',
+            cursor:'pointer', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
+            transition:'background 0.15s', fontWeight: activeSessionId === s.id ? 500 : 400,
+          }}
+            onMouseEnter={e => { if (activeSessionId !== s.id) e.currentTarget.style.background='var(--bg-hover)'; }}
+            onMouseLeave={e => { if (activeSessionId !== s.id) e.currentTarget.style.background='transparent'; }}
+          >{s.title}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// MODEL SELECTOR
+// ════════════════════════════════════════════════════════════════
+
+function ModelSelector({ onNavigate, selectedModel, onSelectModel }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+  const handleSelect = (model) => { onSelectModel(model); setOpen(false); if (model.page) onNavigate(model.page); };
+  return (
+    <div ref={ref} style={{ position:'relative', zIndex:100 }}>
+      <button onClick={() => setOpen(!open)} style={{
+        display:'flex', alignItems:'center', justifyContent:'space-between', padding:'6px 16px', borderRadius:8,
+        border:'1px solid var(--border)', background:'var(--bg)', color:'var(--text-primary)',
+        fontSize:14, cursor:'pointer', transition:'background 0.15s', fontWeight:500, minWidth:160,
+      }}
+        onMouseEnter={e => e.currentTarget.style.background='var(--bg-hover)'}
+        onMouseLeave={e => e.currentTarget.style.background='var(--bg)'}
+      >
+        {selectedModel.name}
+        <i className="fa-solid fa-chevron-down" style={{ fontSize:10, transition:'transform 0.2s', transform: open ? 'rotate(180deg)' : 'none', marginLeft:8 }}></i>
+      </button>
+      {open && (
+        <div style={{
+          position:'absolute', top:'calc(100% + 4px)', left:0, width:250,
+          background:'var(--bg-card)', border:'1px solid var(--border)',
+          borderRadius:10, boxShadow:'0 8px 30px rgba(0,0,0,0.12)',
+          overflow:'hidden', maxHeight:400, overflowY:'auto',
+        }}>
+          {MODELS.map(m => (
+            <div key={m.id} onClick={() => handleSelect(m)} style={{
+              padding:'10px 14px', fontSize:14, color:'var(--text-primary)',
+              background: selectedModel.id === m.id ? 'var(--bg-hover)' : 'transparent',
+              cursor:'pointer', transition:'background 0.12s',
+            }}
+              onMouseEnter={e => { if (selectedModel.id !== m.id) e.currentTarget.style.background='var(--bg-secondary)'; }}
+              onMouseLeave={e => { if (selectedModel.id !== m.id) e.currentTarget.style.background='transparent'; }}
+            >
+              <div style={{ fontWeight:500 }}>{m.name}</div>
+              <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2 }}>此处为模型介绍</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// TOP BAR
+// ════════════════════════════════════════════════════════════════
+
+function TopBar({ dark, onToggleTheme }) {
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+      <button onClick={onToggleTheme} style={{ ...iconBtnStyle, color:'var(--text-muted)' }} title="切换主题">
+        {dark
+          ? <span dangerouslySetInnerHTML={{__html: SVG_SUN}} style={{display:'flex', marginLeft:5}} />
+          : <i className="fa-solid fa-moon" style={{ fontSize:16 }}></i>
+        }
+      </button>
+      <button style={iconBtnStyle} title="客服">
+        <i className="fa-solid fa-headset" style={{ fontSize:16, color:'var(--text-muted)' }}></i>
+      </button>
+      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+        <div style={{
+          width:30, height:30, borderRadius:'50%',
+          background:'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+          display:'flex', alignItems:'center', justifyContent:'center',
+          color:'#fff', fontSize:12, fontWeight:600,
+        }}>京</div>
+        <span style={{ fontSize:13, color:'var(--text-secondary)', fontWeight:500 }}>京小东</span>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// PARTICLES
+// ════════════════════════════════════════════════════════════════
+
+function Particles() {
+  const particles = useMemo(() =>
+    Array.from({ length: 18 }, (_, i) => ({
+      id: i, size: 4 + (i * 7) % 10, left: (5 + (i * 31) % 90) + '%',
+      top: ((i * 17) % 60 + 20) + '%', dur: 4 + (i * 3) % 6, delay: (i * 0.7) % 4,
+    })), []);
+  return (
+    <div style={{ position:'absolute', inset:0, pointerEvents:'none', overflow:'hidden' }}>
+      {particles.map(p => (
+        <div key={p.id} className="particle" style={{
+          width: p.size, height: p.size, left: p.left, top: p.top,
+          animationDuration: p.dur + 's', animationDelay: p.delay + 's',
+        }} />
+      ))}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// THE ONE BOX (shared between home and chat)
+// ════════════════════════════════════════════════════════════════
+
+function TheOneBox({ onSubmit, uploadedFiles, onFilesChange, compact, onSpaceExplore, visualMode, onVisualModeChange }) {
+  const [input, setInput] = useState('');
+  const [webSearch, setWebSearch] = useState(false);
+  const [micOn, setMicOn] = useState(false);
+  const [genType, setGenType] = useState('image');
+  const [genDropOpen, setGenDropOpen] = useState(false);
+  const [paramsOpen, setParamsOpen] = useState(false);
+  const [selectedRatio, setSelectedRatio] = useState('16:9');
+  const [selectedDuration, setSelectedDuration] = useState('5s');
+  const [peOn, setPeOn] = useState(true);
+  const [peTooltip, setPeTooltip] = useState(false);
+  const [spaceModal, setSpaceModal] = useState(false);
+  const [spaceTab, setSpaceTab] = useState('3d');
+  const fileInputRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const genDropRef = useRef(null);
+  const paramsRef = useRef(null);
+  const peRef = useRef(null);
+
+  const RATIOS = [
+    { label:'16:9', w:24, h:14 }, { label:'3:2', w:21, h:14 }, { label:'4:3', w:20, h:15 },
+    { label:'1:1', w:16, h:16 }, { label:'3:4', w:15, h:20 }, { label:'2:3', w:14, h:21 }, { label:'9:16', w:14, h:24 },
+  ];
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (genDropRef.current && !genDropRef.current.contains(e.target)) setGenDropOpen(false);
+      if (paramsRef.current && !paramsRef.current.contains(e.target)) setParamsOpen(false);
+      if (peRef.current && !peRef.current.contains(e.target)) setPeTooltip(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleSubmit = () => {
+    if (input.trim()) { onSubmit(input, uploadedFiles, visualMode, genType); setInput(''); onFilesChange([]); }
+  };
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
+  };
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length) onFilesChange(prev => [...prev, ...files]);
+    e.target.value = '';
+  };
+  const removeFile = (idx) => { onFilesChange(prev => prev.filter((_, i) => i !== idx)); };
+
+  const toggleMic = () => {
+    if (micOn) {
+      if (recognitionRef.current) recognitionRef.current.stop();
+      setMicOn(false);
+      return;
+    }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert('浏览器不支持语音识别'); return; }
+    const recognition = new SR();
+    recognition.lang = 'zh-CN';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.onresult = (e) => {
+      let transcript = '';
+      for (let i = 0; i < e.results.length; i++) transcript += e.results[i][0].transcript;
+      setInput(transcript);
+    };
+    recognition.onerror = () => setMicOn(false);
+    recognition.onend = () => setMicOn(false);
+    recognition.start();
+    recognitionRef.current = recognition;
+    setMicOn(true);
+  };
+
+  const hasFiles = uploadedFiles.length > 0;
+  const modelLabel = genType === 'video' ? (hasFiles ? 'JoyAI-Video-Edit' : 'JoyAI-Video') : (hasFiles ? 'JoyAI-Image-Edit' : 'JoyAI-Image');
+
+  const tbItem = { display:'flex', alignItems:'center', gap:4, padding:'5px 6px', borderRadius:8, fontSize:13, color:'#333', cursor:'pointer', position:'relative', transition:'background 0.15s', whiteSpace:'nowrap', background:'none', border:'none' };
+
+  return (
+    <div style={{ width:'100%', maxWidth:780, margin:'0 auto' }}>
+      <div style={{
+        background:'var(--bg)', borderRadius:16, border:'1px solid var(--border)',
+        padding:0, transition:'background 0.3s, border-color 0.3s', position:'relative',
+      }}>
+        {uploadedFiles.length > 0 && (
+          <div style={{ display:'flex', flexWrap:'wrap', gap:8, padding:'12px 16px 0' }}>
+            {uploadedFiles.map((file, i) => (
+              <div key={i} style={{
+                position:'relative', width:64, height:64, borderRadius:8,
+                background:'var(--bg-hover)', overflow:'hidden', flexShrink:0,
+                display:'flex', alignItems:'center', justifyContent:'center',
+              }}>
+                {file.type.startsWith('image/') ? (
+                  <img src={URL.createObjectURL(file)} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+                ) : file.type.startsWith('video/') ? (
+                  <i className="fa-solid fa-video" style={{ fontSize:20, color:'var(--text-muted)' }}></i>
+                ) : (
+                  <i className="fa-solid fa-file" style={{ fontSize:20, color:'var(--text-muted)' }}></i>
+                )}
+                <button onClick={() => removeFile(i)} style={{
+                  position:'absolute', top:2, right:2, width:18, height:18, borderRadius:'50%',
+                  background:'rgba(0,0,0,0.5)', border:'none', cursor:'pointer',
+                  display:'flex', alignItems:'center', justifyContent:'center',
+                }}>
+                  <i className="fa-solid fa-xmark" style={{ fontSize:10, color:'#fff' }}></i>
+                </button>
+                <div style={{
+                  position:'absolute', bottom:0, left:0, right:0,
+                  background:'rgba(0,0,0,0.5)', fontSize:9, color:'#fff',
+                  padding:'1px 4px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
+                }}>{file.name}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        <textarea
+          value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
+          placeholder="输入内容..." rows={compact ? 2 : 3}
+          style={{
+            width:'100%', background:'transparent', border:'none', outline:'none',
+            resize:'none', padding:'16px 16px 8px', fontSize:13, lineHeight:1.6,
+            color:'var(--text-primary)', fontWeight:400,
+            fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif',
+            minHeight: compact ? 50 : (uploadedFiles.length > 0 ? 90 : 80),
+          }}
+        />
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'4px 12px 10px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:0, flexWrap:'wrap' }}>
+            <input ref={fileInputRef} type="file" multiple accept={visualMode ? (genType === 'image' ? 'image/*' : 'video/*') : 'image/*,video/*,.pptx,.doc,.docx,.pdf'} onChange={handleFileSelect} style={{ display:'none' }} />
+            <button onClick={() => fileInputRef.current.click()} style={{ ...iconBtnSmall, color:'var(--icon-dim)', marginRight:8 }} title="上传文件">
+              <i className="fa-solid fa-paperclip" style={{ fontSize:15 }}></i>
+            </button>
+
+            {visualMode ? (
+              <React.Fragment>
+                {/* Visual Creation label */}
+                <button onClick={() => onVisualModeChange(false)} style={{
+                  display:'flex', alignItems:'center', gap:5, padding:'4px 10px', borderRadius:6,
+                  border:'1px solid var(--accent)', background:'rgba(59,130,246,0.08)',
+                  color:'var(--accent)', fontSize:13, cursor:'pointer', marginRight:4,
+                }}>
+                  <span dangerouslySetInnerHTML={{__html: INPUT_TOOLS[0].svgIcon.replace(/currentColor/g,'#3b82f6')}} style={{display:'flex'}} />
+                  视觉创作
+                </button>
+
+                {/* Gen type dropdown */}
+                <div ref={genDropRef} style={{ position:'relative' }}>
+                  <button onClick={() => { setGenDropOpen(!genDropOpen); setParamsOpen(false); setPeTooltip(false); }} style={{
+                    ...tbItem, color:'var(--text-primary)',
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.background='var(--bg-hover)'}
+                    onMouseLeave={e => e.currentTarget.style.background='none'}
+                  >
+                    <span dangerouslySetInnerHTML={{__html: genType === 'image' ? SVG_TUXIANG : SVG_LUXIANG}} style={{display:'flex'}} />
+                    <span>{genType === 'image' ? '图像生成' : '视频生成'}</span>
+                    <i className="fa-solid fa-chevron-down" style={{ fontSize:8, transition:'transform 0.2s', transform: genDropOpen ? 'rotate(180deg)' : 'none' }}></i>
+                  </button>
+                  {genDropOpen && (
+                    <div style={{
+                      position:'absolute', bottom:'calc(100% + 6px)', left:0, minWidth:130,
+                      background:'var(--bg-card)', borderRadius:10, boxShadow:'0 4px 20px rgba(0,0,0,0.12)',
+                      border:'1px solid var(--border)', padding:4, zIndex:100,
+                    }} className="fade-in">
+                      <div onClick={() => { setGenType('image'); setGenDropOpen(false); }} style={{
+                        display:'flex', alignItems:'center', gap:8, padding:'8px 12px', borderRadius:7,
+                        fontSize:13, cursor:'pointer', color: genType === 'image' ? 'var(--accent)' : 'var(--text-secondary)',
+                        transition:'background 0.12s',
+                      }}
+                        onMouseEnter={e => e.currentTarget.style.background='var(--bg-hover)'}
+                        onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                      >
+                        <span dangerouslySetInnerHTML={{__html: SVG_TUXIANG}} style={{display:'flex'}} /> 图像生成
+                      </div>
+                      <div onClick={() => { setGenType('video'); setGenDropOpen(false); }} style={{
+                        display:'flex', alignItems:'center', gap:8, padding:'8px 12px', borderRadius:7,
+                        fontSize:13, cursor:'pointer', color: genType === 'video' ? 'var(--accent)' : 'var(--text-secondary)',
+                        transition:'background 0.12s',
+                      }}
+                        onMouseEnter={e => e.currentTarget.style.background='var(--bg-hover)'}
+                        onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                      >
+                        <span dangerouslySetInnerHTML={{__html: SVG_LUXIANG}} style={{display:'flex'}} /> 视频生成
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Model label */}
+                <span style={{ fontSize:13, color:'var(--text-primary)', padding:'5px 7px 5px 10px', whiteSpace:'nowrap' }}>{modelLabel}</span>
+
+                {/* Params dropdown */}
+                <div ref={paramsRef} style={{ position:'relative' }}>
+                  <button onClick={() => { setParamsOpen(!paramsOpen); setGenDropOpen(false); setPeTooltip(false); }} style={{
+                    ...tbItem, color:'var(--text-primary)',
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.background='var(--bg-hover)'}
+                    onMouseLeave={e => e.currentTarget.style.background='none'}
+                  >
+                    <span dangerouslySetInnerHTML={{__html: SVG_TIAOJIEQI}} style={{display:'flex'}} />
+                    <span>{'比例 ' + selectedRatio}</span>
+                    <i className="fa-solid fa-chevron-down" style={{ fontSize:8, transition:'transform 0.2s', transform: paramsOpen ? 'rotate(180deg)' : 'none' }}></i>
+                  </button>
+                  {paramsOpen && (
+                    <div style={{
+                      position:'absolute', bottom:'calc(100% + 6px)', left:0,
+                      background:'var(--bg-card)', borderRadius:10, boxShadow:'0 4px 20px rgba(0,0,0,0.12)',
+                      border:'1px solid var(--border)', padding:'8px 12px', zIndex:100, whiteSpace:'nowrap',
+                    }} className="fade-in">
+                      {/* Ratio row */}
+                      <div style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 0' }}>
+                        {RATIOS.map(r => (
+                          <div key={r.label} onClick={() => { setSelectedRatio(r.label); setParamsOpen(false); }} style={{
+                            display:'flex', alignItems:'center', gap:4, padding:'4px 8px', borderRadius:6,
+                            fontSize:12, cursor:'pointer', color: selectedRatio === r.label ? 'var(--accent)' : 'var(--text-secondary)',
+                            transition:'background 0.12s',
+                          }}
+                            onMouseEnter={e => e.currentTarget.style.background='var(--bg-hover)'}
+                            onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                          >
+                            <div style={{ width:r.w*0.7, height:r.h*0.7, border: '1.5px solid ' + (selectedRatio === r.label ? 'var(--accent)' : '#bbb'), borderRadius:2 }} />
+                            <span>{r.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Resolution row */}
+                      <div style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 0', borderTop:'1px solid var(--border-light)' }}>
+                        <div style={{ padding:'4px 8px', borderRadius:6, fontSize:12, color:'var(--accent)', cursor:'pointer' }}>
+                          {genType === 'image' ? '1K' : '720P'}
+                        </div>
+                      </div>
+                      {/* Duration row (video only) */}
+                      {genType === 'video' && (
+                        <div style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 0', borderTop:'1px solid var(--border-light)' }}>
+                          {['5s','10s'].map(d => (
+                            <div key={d} onClick={() => setSelectedDuration(d)} style={{
+                              padding:'4px 8px', borderRadius:6, fontSize:12, cursor:'pointer',
+                              color: selectedDuration === d ? 'var(--accent)' : 'var(--text-secondary)',
+                            }}
+                              onMouseEnter={e => e.currentTarget.style.background='var(--bg-hover)'}
+                              onMouseLeave={e => e.currentTarget.style.background='transparent'}
+                            >{d}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Space Explore (image only) */}
+                {genType === 'image' && (
+                  <button onClick={() => onSpaceExplore && onSpaceExplore()} style={{ ...tbItem, color:'var(--text-primary)' }}
+                    onMouseEnter={e => e.currentTarget.style.background='var(--bg-hover)'}
+                    onMouseLeave={e => e.currentTarget.style.background='none'}
+                  >
+                    <span dangerouslySetInnerHTML={{__html: SVG_QIUTI}} style={{display:'flex'}} />
+                    <span>空间探索</span>
+                  </button>
+                )}
+
+                {/* PE toggle */}
+                <div ref={peRef} style={{ display:'flex', alignItems:'center', gap:6, padding:'0 6px', position:'relative' }}>
+                  <div onClick={() => setPeOn(!peOn)} style={{
+                    width:40, height:22, borderRadius:11, background: peOn ? '#1565C0' : '#ddd',
+                    cursor:'pointer', position:'relative', transition:'background 0.25s', flexShrink:0,
+                  }}>
+                    <div style={{
+                      position:'absolute', top:2, left: peOn ? 20 : 2,
+                      width:18, height:18, borderRadius:'50%', background:'#fff',
+                      display:'flex', alignItems:'center', justifyContent:'center',
+                      fontSize:7, fontWeight:700, color: peOn ? '#1565C0' : '#aaa',
+                      transition:'all 0.25s', boxShadow:'0 1px 3px rgba(0,0,0,0.15)',
+                    }}>PE</div>
+                  </div>
+                  <div onClick={(e) => { e.stopPropagation(); setPeTooltip(!peTooltip); setGenDropOpen(false); setParamsOpen(false); }} style={{
+                    width:16, height:16, borderRadius:'50%', border:'1.5px solid #ccc',
+                    display:'flex', alignItems:'center', justifyContent:'center',
+                    fontSize:10, color:'#aaa', cursor:'pointer', flexShrink:0,
+                  }}>?</div>
+                  {peTooltip && (
+                    <div style={{
+                      position:'absolute', bottom:'calc(100% + 8px)', left:'50%', transform:'translateX(-50%)',
+                      background:'var(--bg-card)', borderRadius:12, boxShadow:'0 4px 24px rgba(0,0,0,0.12)',
+                      border:'1px solid var(--border)', padding:'16px 18px', zIndex:200,
+                      width:320, fontSize:13, lineHeight:1.8, color:'var(--text-secondary)', whiteSpace:'normal',
+                    }} className="fade-in">
+                      <div style={{ fontWeight:600, color:'var(--text-primary)', marginBottom:8, fontSize:14 }}>什么是PE？</div>
+                      <div>PE，提示词工程（Prompt Engineering），其是一种利用自然语言描述（即提示词）来指导人工智能模型生成特定视觉内容的技术。它通过优化输入文本的结构、关键词和细节，使AI能够更准确地理解用户意图，从而输出符合预期的创意作品。</div>
+                    </div>
+                  )}
+                </div>
+              </React.Fragment>
+            ) : (
+              <React.Fragment>
+                <button onClick={() => setWebSearch(!webSearch)} style={{
+                  display:'flex', alignItems:'center', gap:5, padding:'4px 10px', borderRadius:6,
+                  border: '1px solid ' + (webSearch ? 'var(--accent)' : 'var(--border)'),
+                  background: webSearch ? 'rgba(59,130,246,0.08)' : 'transparent',
+                  color: webSearch ? 'var(--accent)' : 'var(--text-primary)',
+                  fontSize:13, cursor:'pointer', transition:'all 0.2s',
+                }}>
+                  <span dangerouslySetInnerHTML={{__html: SVG_GLOBE}} style={{display:'flex'}} />
+                  联网搜索
+                </button>
+                {INPUT_TOOLS.map(tool => (
+                  <button key={tool.id} onClick={tool.id === 'image-gen' ? () => onVisualModeChange(true) : undefined} style={{
+                    display:'flex', alignItems:'center', gap:5, background:'none', border:'none',
+                    cursor:'pointer', fontSize:13, color:'var(--text-primary)', padding:'4px 6px', marginLeft:4,
+                    transition:'opacity 0.15s',
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.opacity='0.6'}
+                    onMouseLeave={e => e.currentTarget.style.opacity='1'}
+                  >
+                    {tool.svgIcon
+                      ? <span dangerouslySetInnerHTML={{__html: tool.svgIcon}} style={{display:'flex'}} />
+                      : <i className={tool.icon} style={{ fontSize:13 }}></i>
+                    }
+                    {tool.label}
+                  </button>
+                ))}
+              </React.Fragment>
+            )}
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <button onClick={toggleMic} style={{
+              width:32, height:32, borderRadius:'50%',
+              background: micOn ? 'var(--accent)' : 'var(--bg-hover)',
+              border:'none', cursor:'pointer',
+              display:'flex', alignItems:'center', justifyContent:'center',
+              transition:'all 0.2s',
+            }} title="语音输入">
+              <i className="fa-solid fa-microphone" style={{ fontSize:14, color: micOn ? '#fff' : 'var(--icon-dim)' }}></i>
+            </button>
+            <button onClick={handleSubmit} style={{
+              width:32, height:32, borderRadius:'50%',
+              background: input.trim() ? 'var(--accent)' : 'var(--bg-hover)',
+              border:'none', cursor:'pointer',
+              display:'flex', alignItems:'center', justifyContent:'center',
+              transition:'background 0.2s',
+            }} title="发送">
+              <i className="fa-solid fa-arrow-up" style={{ fontSize:14, color: input.trim() ? '#fff' : 'var(--icon-dim)' }}></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// FEATURE CARDS
+// ════════════════════════════════════════════════════════════════
+
+function FeatureCards({ onNavigate, compact }) {
+  return (
+    <div style={{ width:'100%', maxWidth:780, margin:'0 auto' }}>
+      {!compact && <p style={{ textAlign:'center', fontSize:13, color:'var(--icon-dim)', margin:'20px 0 12px' }}>特色功能</p>}
+      <div style={{ display:'flex', gap: compact ? 8 : 10, justifyContent:'center', flexWrap:'nowrap' }}>
+        {FEATURES.map((f, i) => (
+          <div key={i} onClick={() => f.page && onNavigate(f.page)} style={{
+            display:'flex', alignItems:'center', gap: compact ? 6 : 8,
+            padding: compact ? '8px 10px' : '10px 14px', borderRadius: compact ? 8 : 12,
+            background:'var(--bg-card)', boxShadow:'var(--shadow-card)',
+            cursor: f.page ? 'pointer' : 'default',
+            transition:'transform 0.2s, box-shadow 0.2s',
+            flex:'1 1 0', minWidth:0,
+          }}
+            onMouseEnter={e => { e.currentTarget.style.transform='translateY(-2px)'; e.currentTarget.style.boxShadow='0 6px 20px rgba(0,0,0,0.1)'; }}
+            onMouseLeave={e => { e.currentTarget.style.transform='translateY(0)'; e.currentTarget.style.boxShadow='var(--shadow-card)'; }}
+          >
+            <div style={{
+              width: compact ? 26 : 32, height: compact ? 26 : 32, borderRadius: compact ? 6 : 8,
+              background: f.gradient, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0,
+            }}>
+              <i className={f.icon} style={{ color:'#fff', fontSize: compact ? 11 : 13 }}></i>
+            </div>
+            <span style={{ fontSize: compact ? 11 : 12, color:'var(--text-primary)', fontWeight:500, whiteSpace:'nowrap' }}>{f.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// CHAT PAGE
+// ════════════════════════════════════════════════════════════════
+
+function ChatPage({ session, onSendMessage, onNavigate, uploadedFiles, onFilesChange, onSpaceExplore, visualMode, onVisualModeChange, onEditMessage }) {
+  const endRef = useRef(null);
+  const [lightbox, setLightbox] = useState(null);
+  const [hoveredMsg, setHoveredMsg] = useState(null);
+  const [editingIdx, setEditingIdx] = useState(null);
+  const [editText, setEditText] = useState('');
+  useEffect(() => { endRef.current && endRef.current.scrollIntoView({ behavior: 'smooth' }); }, [session.messages]);
+
+  const copyText = (text) => { navigator.clipboard.writeText(text); };
+
+  const startEdit = (idx, content) => { setEditingIdx(idx); setEditText(content); };
+  const submitEdit = () => {
+    if (editText.trim() && editingIdx !== null) {
+      onEditMessage(editingIdx, editText);
+      setEditingIdx(null);
+      setEditText('');
+    }
+  };
+
+  const lastUserIdx = (() => { for (let i = session.messages.length - 1; i >= 0; i--) { if (session.messages[i].role === 'user') return i; } return -1; })();
+  const lastAssistantIdx = (() => { for (let i = session.messages.length - 1; i >= 0; i--) { if (session.messages[i].role === 'assistant') return i; } return -1; })();
+
+  const actionIcon = { background:'none', border:'none', cursor:'pointer', color:'var(--text-muted)', fontSize:13, padding:4, borderRadius:4, display:'flex', alignItems:'center', justifyContent:'center', transition:'color 0.15s' };
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+      {lightbox && (
+        <div onClick={() => setLightbox(null)} style={{
+          position:'fixed', inset:0, zIndex:9999, background:'rgba(0,0,0,0.8)',
+          display:'flex', alignItems:'center', justifyContent:'center', cursor:'zoom-out',
+        }}>
+          <img src={lightbox} alt="" style={{ maxWidth:'90vw', maxHeight:'90vh', objectFit:'contain', borderRadius:8 }} />
+        </div>
+      )}
+      <div style={{ flex:1, overflowY:'auto', padding:'20px 20px 10px' }}>
+        {session.messages.map((msg, i) => (
+          <div key={i}
+            onMouseEnter={() => setHoveredMsg(i)}
+            onMouseLeave={() => setHoveredMsg(null)}
+            style={{
+              display:'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+              marginBottom:16,
+            }} className="fade-in">
+            <div style={{ maxWidth: msg.role === 'user' ? '70%' : '85%' }}>
+              {msg.files && msg.files.length > 0 && (
+                <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:8, justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                  {msg.files.map((f, fi) => (
+                    <div key={fi} onClick={() => f.url && setLightbox(f.url)} style={{
+                      width:56, height:56, borderRadius:8, overflow:'hidden', cursor:'pointer',
+                      background:'var(--bg-hover)', display:'flex', alignItems:'center', justifyContent:'center',
+                    }}>
+                      {f.type === 'image' ? (
+                        <img src={f.url} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+                      ) : (
+                        <i className={'fa-solid ' + (f.type === 'video' ? 'fa-video' : 'fa-file')} style={{ fontSize:18, color:'var(--text-muted)' }}></i>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {editingIdx === i ? (
+                <div style={{ display:'flex', gap:8, alignItems:'flex-end' }}>
+                  <textarea value={editText} onChange={e => setEditText(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEdit(); } }}
+                    style={{
+                      flex:1, padding:'10px 14px', borderRadius:12, border:'1px solid var(--accent)',
+                      background:'var(--bg)', color:'var(--text-primary)', fontSize:14, lineHeight:1.6,
+                      resize:'none', outline:'none', minHeight:44, fontFamily:'inherit',
+                    }}
+                  />
+                  <button onClick={submitEdit} style={{
+                    padding:'8px 14px', borderRadius:8, border:'none', background:'var(--accent)',
+                    color:'#fff', fontSize:13, cursor:'pointer', whiteSpace:'nowrap',
+                  }}>发送</button>
+                  <button onClick={() => setEditingIdx(null)} style={{
+                    padding:'8px 14px', borderRadius:8, border:'1px solid var(--border)', background:'var(--bg)',
+                    color:'var(--text-secondary)', fontSize:13, cursor:'pointer', whiteSpace:'nowrap',
+                  }}>取消</button>
+                </div>
+              ) : (
+                <div style={{
+                  padding:'12px 16px', borderRadius:16,
+                  background: msg.role === 'user' ? 'rgba(59,130,246,0.12)' : 'transparent',
+                  borderBottomRightRadius: msg.role === 'user' ? 4 : 16,
+                  borderBottomLeftRadius: msg.role === 'user' ? 16 : 4,
+                  fontSize:14, lineHeight:1.7, color:'var(--text-primary)',
+                  whiteSpace:'pre-wrap',
+                }}>{msg.content}</div>
+              )}
+              {/* Action icons - only show on hover */}
+              {hoveredMsg === i && editingIdx !== i && (
+                <div style={{
+                  display:'flex', gap:4, marginTop:4,
+                  justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                  paddingLeft: msg.role === 'assistant' ? 16 : 0,
+                }}>
+                  {msg.role === 'assistant' && (
+                    <React.Fragment>
+                      <button onClick={() => copyText(msg.content)} style={actionIcon} title="复制"
+                        onMouseEnter={e => e.currentTarget.style.color='var(--text-primary)'}
+                        onMouseLeave={e => e.currentTarget.style.color='var(--text-muted)'}
+                      ><span dangerouslySetInnerHTML={{__html:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'}} style={{display:'flex'}} /></button>
+                      <button style={actionIcon} title="点赞"
+                        onMouseEnter={e => e.currentTarget.style.color='var(--text-primary)'}
+                        onMouseLeave={e => e.currentTarget.style.color='var(--text-muted)'}
+                      ><span dangerouslySetInnerHTML={{__html:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>'}} style={{display:'flex'}} /></button>
+                      <button style={actionIcon} title="点踩"
+                        onMouseEnter={e => e.currentTarget.style.color='var(--text-primary)'}
+                        onMouseLeave={e => e.currentTarget.style.color='var(--text-muted)'}
+                      ><span dangerouslySetInnerHTML={{__html:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>'}} style={{display:'flex'}} /></button>
+                      {i === lastAssistantIdx && (
+                        <button style={actionIcon} title="重新生成"
+                          onMouseEnter={e => e.currentTarget.style.color='var(--text-primary)'}
+                          onMouseLeave={e => e.currentTarget.style.color='var(--text-muted)'}
+                        ><span dangerouslySetInnerHTML={{__html:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>'}} style={{display:'flex'}} /></button>
+                      )}
+                    </React.Fragment>
+                  )}
+                  {msg.role === 'user' && (
+                    <React.Fragment>
+                      <button onClick={() => copyText(msg.content)} style={actionIcon} title="复制"
+                        onMouseEnter={e => e.currentTarget.style.color='var(--text-primary)'}
+                        onMouseLeave={e => e.currentTarget.style.color='var(--text-muted)'}
+                      ><span dangerouslySetInnerHTML={{__html:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'}} style={{display:'flex'}} /></button>
+                      {i === lastUserIdx && (
+                        <button onClick={() => startEdit(i, msg.content)} style={actionIcon} title="编辑"
+                          onMouseEnter={e => e.currentTarget.style.color='var(--text-primary)'}
+                          onMouseLeave={e => e.currentTarget.style.color='var(--text-muted)'}
+                        ><span dangerouslySetInnerHTML={{__html:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>'}} style={{display:'flex'}} /></button>
+                      )}
+                    </React.Fragment>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+      <div style={{ padding:'8px 20px 16px', flexShrink:0, marginTop:'auto' }}>
+        <FeatureCards onNavigate={onNavigate} compact={true} />
+        <div style={{ marginTop:10 }}>
+          <TheOneBox onSubmit={onSendMessage} uploadedFiles={uploadedFiles} onFilesChange={onFilesChange} compact={true} onSpaceExplore={onSpaceExplore} visualMode={visualMode} onVisualModeChange={onVisualModeChange} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// DRAG OVERLAY + FULL PAGE VIEW
+// ════════════════════════════════════════════════════════════════
+
+function DragOverlay() {
+  return (
+    <div className="drag-overlay fade-in">
+      <i className="fa-solid fa-cloud-arrow-up" style={{ fontSize:48, color:'var(--accent)', marginBottom:16 }}></i>
+      <p style={{ fontSize:18, fontWeight:600, color:'var(--text-primary)' }}>拖拽文件或图片到此处完成上传</p>
+      <p style={{ fontSize:12, color:'var(--text-muted)', marginTop:8, textAlign:'center', lineHeight:1.7 }}>
+        支持格式：jpg/jpeg/png/mp4/mov/pptx/doc/pdf<br/>文档与图像视频不可同时上传
+      </p>
+    </div>
+  );
+}
+
+function FullPageView({ page, onBack }) {
+  return (
+    <div style={{ width:'100vw', height:'100vh', position:'relative', background:'var(--bg)' }}>
+      <button onClick={onBack} style={{
+        position:'fixed', top:16, left:16, zIndex:100, display:'flex', alignItems:'center', gap:6,
+        padding:'8px 16px', borderRadius:8, background:'var(--bg-card)', border:'1px solid var(--border)',
+        cursor:'pointer', color:'var(--text-primary)', fontSize:13, boxShadow:'0 2px 10px rgba(0,0,0,0.1)',
+      }}>
+        <i className="fa-solid fa-arrow-left"></i> 返回
+      </button>
+      <img src={PAGES[page]} alt="" style={{ width:'100%', height:'100%', objectFit:'contain' }} />
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// MAIN APP
+// ════════════════════════════════════════════════════════════════
+
+function App() {
+  const [dark, setDark] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [currentPage, setCurrentPage] = useState(null);
+
+  const [sessions, setSessions] = useState([]);
+  const [activeSessionId, setActiveSessionId] = useState(null);
+  const [spaceModal, setSpaceModal] = useState(false);
+  const [spaceTab, setSpaceTab] = useState('3d');
+  const [view, setView] = useState('home');
+  const [selectedModel, setSelectedModel] = useState(MODELS[0]);
+  const [visualMode, setVisualMode] = useState(false);
+
+  const dragCounter = useRef(0);
+  const nextIdRef = useRef(1);
+
+  const activeSession = sessions.find(s => s.id === activeSessionId);
+
+  const toggleTheme = () => setDark(d => !d);
+
+  useEffect(() => {
+    if (dark) document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
+  }, [dark]);
+
+  useEffect(() => {
+    const onDragEnter = (e) => { e.preventDefault(); dragCounter.current++; if (dragCounter.current === 1) setDragging(true); };
+    const onDragLeave = (e) => { e.preventDefault(); dragCounter.current--; if (dragCounter.current === 0) setDragging(false); };
+    const onDragOver = (e) => { e.preventDefault(); };
+    const onDrop = (e) => {
+      e.preventDefault(); dragCounter.current = 0; setDragging(false);
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length) setUploadedFiles(prev => [...prev, ...files]);
+    };
+    document.addEventListener('dragenter', onDragEnter);
+    document.addEventListener('dragleave', onDragLeave);
+    document.addEventListener('dragover', onDragOver);
+    document.addEventListener('drop', onDrop);
+    return () => {
+      document.removeEventListener('dragenter', onDragEnter);
+      document.removeEventListener('dragleave', onDragLeave);
+      document.removeEventListener('dragover', onDragOver);
+      document.removeEventListener('drop', onDrop);
+    };
+  }, []);
+
+  const handleNewChat = () => {
+    setActiveSessionId(null);
+    setView('home');
+    setSpaceModal(false);
+  };
+
+  const handleSpaceExplore = () => {
+    if (view === 'home') {
+      const id = nextIdRef.current++;
+      const newSession = { id, title: '空间探索', messages: [] };
+      setSessions(prev => [newSession, ...prev]);
+      setActiveSessionId(id);
+      setView('chat');
+    }
+    setSpaceModal(true);
+  };
+
+  const filesToAttachments = (files) => {
+    if (!files || !files.length) return [];
+    return files.map(f => ({
+      type: f.type.startsWith('image/') ? 'image' : (f.type.startsWith('video/') ? 'video' : 'file'),
+      url: f.type.startsWith('image/') ? URL.createObjectURL(f) : null,
+      name: f.name,
+    }));
+  };
+
+  const determineModel = (files, isVisual, vGenType) => {
+    const hasFiles = files && files.length > 0;
+    if (isVisual) {
+      if (vGenType === 'video') return MODELS.find(m => m.id === (hasFiles ? 'video-edit' : 'video'));
+      return MODELS.find(m => m.id === (hasFiles ? 'image-edit' : 'image'));
+    }
+    if (hasFiles) return MODELS.find(m => m.id === 'vl');
+    return selectedModel;
+  };
+
+  const handleSubmitFromHome = (input, files, isVisual, vGenType) => {
+    const id = nextIdRef.current++;
+    const title = input.length > 20 ? input.slice(0, 20) + '...' : input;
+    const attachments = filesToAttachments(files);
+    const newModel = determineModel(files, isVisual, vGenType);
+    if (newModel) setSelectedModel(newModel);
+    const newSession = {
+      id: id,
+      title: title,
+      messages: [
+        { role: 'user', content: input, files: attachments },
+        { role: 'assistant', content: generateMockReply(input) },
+      ],
+    };
+    setSessions(prev => [newSession, ...prev]);
+    setActiveSessionId(id);
+    setView('chat');
+  };
+
+  const handleSendInChat = (input, files, isVisual, vGenType) => {
+    const attachments = filesToAttachments(files);
+    const newModel = determineModel(files, isVisual, vGenType);
+    if (newModel) setSelectedModel(newModel);
+    setSessions(prev => prev.map(s => {
+      if (s.id !== activeSessionId) return s;
+      return {
+        ...s,
+        messages: [
+          ...s.messages,
+          { role: 'user', content: input, files: attachments },
+          { role: 'assistant', content: generateMockReply(input) },
+        ],
+      };
+    }));
+  };
+
+  const handleSelectSession = (id) => {
+    setActiveSessionId(id);
+    setView('chat');
+  };
+
+  const handleEditMessage = (msgIdx, newContent) => {
+    setSessions(prev => prev.map(s => {
+      if (s.id !== activeSessionId) return s;
+      const msgs = s.messages.slice(0, msgIdx);
+      msgs.push({ ...s.messages[msgIdx], content: newContent });
+      msgs.push({ role: 'assistant', content: generateMockReply(newContent) });
+      return { ...s, messages: msgs };
+    }));
+  };
+
+  const handleNavigate = (page) => setCurrentPage(page);
+
+  if (currentPage && PAGES[currentPage]) {
+    return <FullPageView page={currentPage} onBack={() => setCurrentPage(null)} />;
+  }
+
+  return (
+    <div style={{ display:'flex', height:'100vh', overflow:'hidden' }}>
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        onToggle={() => setSidebarCollapsed(c => !c)}
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onSelectSession={handleSelectSession}
+        onNewChat={handleNewChat}
+      />
+
+      {sidebarCollapsed && (
+        <div style={{ position:'fixed', top:12, left:12, zIndex:200, display:'flex', alignItems:'center', gap:6 }}>
+          <button onClick={() => setSidebarCollapsed(false)} style={{
+            background:'var(--bg-card)', border:'1px solid var(--border)',
+            borderRadius:8, padding:'7px 9px', cursor:'pointer',
+            boxShadow:'0 2px 8px rgba(0,0,0,0.08)',
+            display:'flex', alignItems:'center', justifyContent:'center',
+          }}>
+            <i className="fa-solid fa-bars" style={{ fontSize:14, color:'var(--text-muted)' }}></i>
+          </button>
+          {view === 'chat' && (
+            <button onClick={handleNewChat} style={{
+              background:'var(--bg-card)', border:'1px solid var(--border)',
+              borderRadius:8, padding:'7px 9px', cursor:'pointer',
+              boxShadow:'0 2px 8px rgba(0,0,0,0.08)',
+              display:'flex', alignItems:'center', justifyContent:'center',
+            }} title="新对话">
+              <i className="fa-regular fa-pen-to-square" style={{ fontSize:14, color:'var(--text-muted)' }}></i>
+            </button>
+          )}
+        </div>
+      )}
+
+      <div style={{ flex:1, display:'flex', flexDirection:'column', height:'100vh', overflow:'hidden', position:'relative' }}>
+        <div style={{
+          display:'flex', alignItems:'center', justifyContent:'space-between', position:'relative',
+          padding: sidebarCollapsed ? (view === 'chat' ? '12px 20px 12px 100px' : '12px 20px 12px 56px') : '12px 20px',
+          flexShrink:0, transition:'padding 0.3s',
+        }}>
+          <ModelSelector onNavigate={handleNavigate} selectedModel={selectedModel} onSelectModel={setSelectedModel} />
+          {view === 'chat' && activeSession && (
+            <span style={{ fontSize:15, fontWeight:600, color:'var(--text-primary)', position:'absolute', left:'50%', transform:'translateX(-50%)' }}>{activeSession.title}</span>
+          )}
+          <TopBar dark={dark} onToggleTheme={toggleTheme} />
+        </div>
+
+        {view === 'home' ? (
+          <div style={{
+            flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+            overflow:'auto', position:'relative', padding:'0 20px 40px',
+          }}>
+            <Particles />
+            <div style={{ textAlign:'center', marginBottom:20, position:'relative', zIndex:1 }} className="fade-in">
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:0 }}>
+                <span style={{ fontSize:28, fontWeight:700, color:'var(--text-primary)' }}>你好，我是</span>
+                <img src="assets/logo.png" alt="JoyAI" style={{ height:58, objectFit:'contain', marginLeft:-1, position:'relative', top:0 }} />
+              </div>
+            </div>
+            <div style={{ position:'relative', zIndex:1, width:'100%' }}>
+              <TheOneBox onSubmit={handleSubmitFromHome} uploadedFiles={uploadedFiles} onFilesChange={setUploadedFiles} onSpaceExplore={handleSpaceExplore} visualMode={visualMode} onVisualModeChange={setVisualMode} />
+            </div>
+            <div style={{ position:'relative', zIndex:1, width:'100%', marginTop:8 }}>
+              <FeatureCards onNavigate={handleNavigate} />
+            </div>
+          </div>
+        ) : (
+          activeSession && (
+            <ChatPage
+              session={activeSession}
+              onSendMessage={handleSendInChat}
+              onNavigate={handleNavigate}
+              uploadedFiles={uploadedFiles}
+              onFilesChange={setUploadedFiles}
+              onSpaceExplore={handleSpaceExplore}
+              visualMode={visualMode}
+              onVisualModeChange={setVisualMode}
+              onEditMessage={handleEditMessage}
+            />
+          )
+        )}
+
+        {/* Space Explore Modal - overlay only covers main area */}
+        {spaceModal && (
+          <div onClick={() => setSpaceModal(false)} style={{
+            position:'absolute', inset:0, background:'rgba(0,0,0,0.35)', zIndex:500,
+            display:'flex', alignItems:'center', justifyContent:'center',
+          }}>
+            <div onClick={e => e.stopPropagation()} style={{
+              background:'var(--bg-card)', borderRadius:16, padding:24, width:560, maxHeight:'80vh', overflow:'auto', position:'relative',
+            }}>
+              <div onClick={() => setSpaceModal(false)} style={{
+                position:'absolute', top:12, right:14, width:28, height:28, borderRadius:'50%',
+                display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer',
+                color:'#999', fontSize:16,
+              }}
+                onMouseEnter={e => e.currentTarget.style.background='var(--bg-hover)'}
+                onMouseLeave={e => e.currentTarget.style.background='transparent'}
+              >✕</div>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:0, marginBottom:20 }}>
+                <div onClick={() => setSpaceTab('3d')} style={{
+                  padding:'8px 20px', fontSize:14, cursor:'pointer', borderRadius:8,
+                  color: spaceTab === '3d' ? 'var(--text-primary)' : '#888', fontWeight: spaceTab === '3d' ? 500 : 400,
+                  background: spaceTab === '3d' ? 'var(--bg-hover)' : 'transparent',
+                }}>3D视角</div>
+                <div onClick={() => setSpaceTab('transform')} style={{
+                  padding:'8px 20px', fontSize:14, cursor:'pointer', borderRadius:8,
+                  color: spaceTab === 'transform' ? 'var(--text-primary)' : '#888', fontWeight: spaceTab === 'transform' ? 500 : 400,
+                  background: spaceTab === 'transform' ? 'var(--bg-hover)' : 'transparent',
+                }}>空间变换</div>
+              </div>
+              <div style={{ display:'flex', gap:20 }}>
+                <div style={{ width:160, flexShrink:0, display:'flex', flexDirection:'column', gap:16 }}>
+                  <div style={{
+                    width:80, height:80, border:'2px dashed #ddd', borderRadius:8,
+                    display:'flex', alignItems:'center', justifyContent:'center', color:'#ccc', fontSize:24,
+                  }}>+</div>
+                  <div style={{ fontSize:12, color:'var(--text-secondary)', lineHeight:1.8 }}>
+                    <strong style={{ color:'var(--text-primary)' }}>移动摄像头</strong><br /><br />
+                    <strong>-相机旋转：</strong>偏航角度 0.0°，俯仰角度 0.0°。<br />
+                    <strong>-相机变焦：</strong>无。<br />
+                    保持全部场景不变，仅改变视角。
+                  </div>
+                  <button style={{
+                    padding:'10px 24px', borderRadius:8, border:'none',
+                    background:'#2563eb', color:'#fff', fontSize:14, fontWeight:500,
+                    cursor:'pointer', width:'100%',
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.background='#1d4ed8'}
+                    onMouseLeave={e => e.currentTarget.style.background='#2563eb'}
+                  >立即生成</button>
+                </div>
+                <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', position:'relative' }}>
+                  <div style={{
+                    width:300, height:300, background:'var(--bg-secondary)', borderRadius:'50%',
+                    display:'flex', alignItems:'center', justifyContent:'center',
+                  }}>
+                    <div style={{ textAlign:'center' }}>
+                      <i className="fa-solid fa-cubes" style={{ fontSize:40, color:'#bbb', marginBottom:12 }}></i>
+                      <div style={{ fontSize:11, color:'#aaa' }}>3D 视角控制区域</div>
+                    </div>
+                  </div>
+                  <div style={{ position:'absolute', bottom:10, right:10, fontSize:11, color:'#888', lineHeight:1.8 }}>
+                    <div><span style={{ display:'inline-block', width:8, height:8, borderRadius:'50%', background:'#2563eb', marginRight:4 }} />蓝球调节环绕角度</div>
+                    <div><span style={{ display:'inline-block', width:8, height:8, borderRadius:'50%', background:'#ef4444', marginRight:4 }} />红球调节上下</div>
+                    <div><span style={{ display:'inline-block', width:8, height:8, borderRadius:'50%', background:'#eab308', marginRight:4 }} />黄球推进拉远</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {dragging && <DragOverlay />}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
